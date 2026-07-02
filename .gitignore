@@ -1,0 +1,10 @@
+/.env
+/.idea
+/vendor
+/storage/backups
+/storage/composer-backups
+/storage/config-backups
+/storage/logs
+/storage/runtime
+/web/cpresources
+.DS_Store
