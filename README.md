@@ -2,118 +2,228 @@
 
 A minimal blueprint for running a headless CraftCMS 5 backend with a Next.js 15 frontend on [Deploio](https://deploio.com), Nine Internet Solutions AG's Heroku-style PaaS.
 
-The backend exposes a GraphQL API. The frontend fetches content at request time via that API. Both apps are deployed separately on Deploio and connect over HTTPS.
+The backend exposes a GraphQL API; the frontend fetches content at request time via that API. Both apps are deployed separately on Deploio and connect over HTTPS.
 
 ## Repo structure
 
 ```
-.                       # Craft CMS backend (PHP)
-├── config/             # Craft + Yii app config (DB, cache, filesystems, GQL)
-├── migrations/         # Content migrations (News section, GQL schema, bearer token)
-├── frontend/           # Next.js 15 frontend
-│   ├── app/            # App Router pages
-│   └── lib/craft.ts    # Typed GraphQL helper
-├── Procfile            # Deploio/Heroku: run migrations then start Apache
-└── nginx.conf          # URL rewriting rules for the nginx buildpack
+.                        # Craft CMS backend (PHP)
+├── config/
+│   ├── app.php          # Yii app config (Redis cache component)
+│   ├── db.php           # Database config (reads Deploio service-connection vars)
+│   └── filesystems.php  # S3-compatible asset storage (reads BUCKET_* vars)
+├── migrations/          # Content migrations (News section, GQL schema, bearer token)
+├── web/index.php        # Craft web entry point
+├── Procfile             # Deploio: run migrations then start Apache
+└── frontend/            # Next.js 15 frontend
+    ├── app/             # App Router pages (/, /[slug])
+    ├── lib/craft.ts     # Typed GraphQL helper
+    └── Procfile         # Deploio: start Next.js
 ```
 
 ## Prerequisites
 
 - [nctl](https://docs.nine.ch/docs/deploio/getting-started) installed and authenticated
-- A Deploio project: `nctl project create my-project`
+- A Deploio project (`nctl create project my-project`)
 
-## Deploy the Craft backend
+Set it as the active project:
+
+```bash
+nctl auth set-project my-project
+```
+
+## Part 1: Deploy the Craft backend
 
 ### 1. Create the app
 
 ```bash
-nctl app create craft-backend --project my-project --git-url https://github.com/your-org/craft-next-deploio-blueprint
+nctl create app craft-backend \
+  --git-url=https://github.com/YOUR_ORG/craft-next-deploio-blueprint \
+  --git-revision=main \
+  --buildpack-stack=heroku
 ```
 
-### 2. Provision a PostgreSQL database
+### 2. Set required environment variables
 
 ```bash
-nctl service create craft-db --type postgresql --project my-project
+nctl update app craft-backend \
+  --sensitive-env="CRAFT_SECURITY_KEY=$(openssl rand -base64 32)" \
+  --env="CRAFT_ENVIRONMENT=production" \
+  --env="CRAFT_DEV_MODE=false" \
+  --env="CRAFT_ALLOW_ADMIN_CHANGES=false" \
+  --env="CRAFT_STORAGE_PATH=/tmp/craft-storage"
 ```
 
-### 3. Connect the database to the app
+`CRAFT_SECURITY_KEY` is required — Craft refuses to start without it. `CRAFT_STORAGE_PATH` redirects Craft's runtime writes (logs, caches) to a writable path on Deploio.
+
+### 3. Provision and connect the database
 
 ```bash
-nctl app service add craft-backend --service craft-db --name craft --project my-project
+nctl create postgresdatabase craft-db --wait
+
+nctl update app craft-backend --service craft=postgresdatabase/craft-db
 ```
 
-This injects `NINE_PG_CRAFT_*` env vars into the app at runtime. The `config/db.php` file reads them automatically.
+The `--service` flag tells Deploio to inject the database credentials automatically as `NINE_PGDB_CRAFT_*` environment variables. The `config/db.php` in this blueprint reads those variables directly — no manual URL construction needed.
 
-### 4. Set required env vars
+### 4. Trigger the first build
+
+The app's build starts automatically once the git URL and env vars are set. Monitor it:
 
 ```bash
-# Generate a unique app ID (any string, e.g. your app name)
-nctl app env set craft-backend CRAFT_APP_ID=my-craft-app --project my-project
-
-# Generate a security key
-nctl app exec craft-backend -- php craft setup/security-key --project my-project
-# Copy the printed key, then:
-nctl app env set craft-backend CRAFT_SECURITY_KEY=<key> --project my-project
+nctl get builds
 ```
 
-### 5. Push to trigger a build
+Wait until a build with `STATUS=Succeeded` appears for `craft-backend`.
+
+### 5. Install Craft (create admin account)
+
+On first startup the Procfile runs `php craft migrate/all`, which creates the database schema, sets up the News section, and generates a GraphQL bearer token. Once the build has succeeded and the app is running:
 
 ```bash
-git push
+nctl exec app craft-backend -- php craft install/craft
 ```
 
-The `Procfile` runs `php craft migrate/all` on every start. On first deploy this:
-- Installs Craft
-- Creates the News section, body field, and GQL schema
-- Generates a bearer token and **prints it to the deploy log**
-
-### 6. Install Craft
-
-After the first build completes:
+Follow the interactive prompts to set the site name, URL, admin email, username, and password. Use the app's Deploio hostname as the site URL — get it with:
 
 ```bash
-nctl app exec craft-backend -- php craft install/craft --project my-project
+nctl get app craft-backend
 ```
 
-Follow the prompts to create an admin account.
+The URL is in the `HOSTS` column and looks like `craft-backend.{HASH}.deploio.app`.
 
-### 7. Retrieve the bearer token
+### 6. Retrieve the GraphQL bearer token
+
+The migration prints the token to the application log on first startup:
 
 ```bash
-nctl app logs craft-backend --project my-project | grep "BEARER TOKEN"
+nctl logs app craft-backend --type=app | grep "BEARER TOKEN"
 ```
 
-Copy the token — you need it for the frontend.
+Copy the token — you'll need it when deploying the frontend.
 
-## Deploy the Next.js frontend
+> If the token line has already scrolled out of the log window, you can find it in the Craft control panel under **Settings → GraphQL → Tokens → frontend-token**.
 
-### 1. Create the frontend app
+---
+
+## Optional: Redis cache
+
+Adding a key-value store enables Craft's cache and session storage.
 
 ```bash
-nctl app create craft-frontend \
-  --project my-project \
-  --git-url https://github.com/your-org/craft-next-deploio-blueprint \
-  --build-subdir frontend
+nctl create keyvaluestore craft-cache --wait
+
+nctl update app craft-backend --service cache=keyvaluestore/craft-cache
 ```
 
-### 2. Set env vars
+The `config/app.php` in this blueprint detects the injected `NINE_KVS_CACHE_*` variables and switches Craft's cache component to Redis automatically.
+
+## Optional: Object storage for assets
+
+By default Craft stores uploaded assets on the local filesystem, which is ephemeral on Deploio. To persist assets across restarts, connect Nine Object Storage.
 
 ```bash
-# Your Craft backend's Deploio hostname (no https://)
-nctl app env set craft-frontend CRAFT_HOST=craft-backend.<id>.deploio.app --project my-project
+# Create a bucket in location nine-cz42 or nine-es34 (same location as your app)
+nctl create bucket craft-assets --location=nine-cz42 --wait
 
-nctl app env set craft-frontend CRAFT_GQL_URL=https://craft-backend.<id>.deploio.app/actions/graphql/api --project my-project
+# Create a bucket user to hold write credentials
+nctl create bucketuser craft-assets-user --location=nine-cz42 --wait
 
-nctl app env set craft-frontend CRAFT_GQL_TOKEN=<token from step 7 above> --project my-project
+# Grant the user write access to the bucket
+nctl update bucket craft-assets --permissions="writer=craft-assets-user"
+
+# Retrieve the credentials
+ACCESS_KEY=$(nctl get bucketuser craft-assets-user --print-access-key)
+SECRET_KEY=$(nctl get bucketuser craft-assets-user --print-secret-key)
+
+# Inject them into the app
+nctl update app craft-backend \
+  --env="BUCKET_ENDPOINT=https://cz42.objects.nineapis.ch" \
+  --env="BUCKET_NAME=craft-assets" \
+  --env="BUCKET_REGION=us-east-1" \
+  --sensitive-env="BUCKET_KEY=${ACCESS_KEY}" \
+  --sensitive-env="BUCKET_SECRET=${SECRET_KEY}"
 ```
 
-### 3. Push to trigger a build
+> Adjust the endpoint to match your chosen location: `cz42` → `https://cz42.objects.nineapis.ch`, `es34` → `https://es34.objects.nineapis.ch`.
+
+With the env vars set, the `config/filesystems.php` in this blueprint configures an S3-compatible filesystem automatically. The last step is to wire it up inside Craft:
+
+1. Log in to the Craft control panel at `https://craft-backend.{HASH}.deploio.app/admin`.
+2. Go to **Settings → Filesystems → New filesystem**.
+3. Set the handle to `nine-s3` and the type to **Amazon S3**. Leave all credential fields blank — they are read from environment variables.
+4. Create an **Asset Volume** that uses the `nine-s3` filesystem.
+
+---
+
+## Part 2: Deploy the Next.js frontend
+
+### 1. Get the backend URL
 
 ```bash
-git push
+nctl get app craft-backend
 ```
 
-The frontend app will be live at its Deploio URL. It renders the News entries from Craft.
+Note the full hostname from the `HOSTS` column, e.g. `craft-backend.baa74b2.deploio.app`.
+
+### 2. Create the frontend app
+
+```bash
+nctl create app craft-frontend \
+  --git-url=https://github.com/YOUR_ORG/craft-next-deploio-blueprint \
+  --git-revision=main \
+  --git-sub-path=frontend \
+  --buildpack-stack=heroku \
+  --port=3000 \
+  --env="CRAFT_GQL_URL=https://craft-backend.{HASH}.deploio.app/actions/graphql/api" \
+  --sensitive-env="CRAFT_GQL_TOKEN={YOUR_BEARER_TOKEN}"
+```
+
+Replace `{HASH}` with your project hash and `{YOUR_BEARER_TOKEN}` with the token from Part 1.
+
+> **Note the GraphQL endpoint path.** CraftCMS 5 exposes the GraphQL API at `/actions/graphql/api`, not `/api`.
+
+---
+
+## Verify the deployment
+
+1. Open the Craft control panel at `https://craft-backend.{HASH}.deploio.app/admin` and create one or two entries in the **News** section.
+2. Visit the frontend at `https://craft-frontend.{HASH}.deploio.app` — your entries should appear.
+3. Click an entry to confirm the detail page loads.
+
+---
+
+## Troubleshooting
+
+**App fails to start after first deploy**
+
+Check if `CRAFT_SECURITY_KEY` is set:
+
+```bash
+nctl get app craft-backend -o yaml | grep CRAFT_SECURITY_KEY
+```
+
+**403 from the GraphQL API**
+
+The GQL schema scope may be missing. Check whether the content migration ran:
+
+```bash
+nctl logs app craft-backend --type=app | grep -i "migration\|bearer\|error"
+```
+
+**No entries on the frontend**
+
+Ensure the bearer token in `CRAFT_GQL_TOKEN` on the frontend app matches what is stored in Craft. You can verify the token in the Craft CP under **Settings → GraphQL → Tokens → frontend-token**.
+
+**401 from the GraphQL API**
+
+If basic auth is enabled on the Craft backend, the `Authorization` header for basic auth conflicts with the `Authorization: Bearer` header for GraphQL. Disable it:
+
+```bash
+nctl update app craft-backend --basic-auth=false
+```
+
+---
 
 ## Local development
 
@@ -128,43 +238,17 @@ php craft migrate/all
 php craft serve
 ```
 
-The bearer token is printed during `php craft migrate/all` if it didn't exist yet. Copy it to `frontend/.env.local`.
+The bearer token is printed during `php craft migrate/all` when it runs for the first time. Copy it to `frontend/.env.local`.
 
 ### Next.js frontend
 
 ```bash
 cd frontend
 npm install
-cp .env.local.example .env.local
-# Edit .env.local: set CRAFT_HOST, CRAFT_GQL_URL, CRAFT_GQL_TOKEN
+# Create frontend/.env.local with:
+#   CRAFT_GQL_URL=http://localhost:8080/actions/graphql/api
+#   CRAFT_GQL_TOKEN=<token from above>
 npm run dev
 ```
 
 The frontend runs on `http://localhost:3000`.
-
-## Optional: Object Storage for assets
-
-To store Craft uploads in Nine Object Storage (S3-compatible) instead of the ephemeral local filesystem:
-
-1. Create a bucket in the Nine console.
-2. Set these env vars on the Craft app:
-   ```
-   BUCKET_ENDPOINT=https://<cluster>.s3.nine.ch
-   BUCKET_REGION=nine-cz42
-   BUCKET_NAME=<your-bucket>
-   BUCKET_KEY=<access-key>
-   BUCKET_SECRET=<secret-key>
-   ```
-3. In the Craft CP, create a Filesystem with handle `nine-s3` (type: Amazon S3). The credentials are injected from env vars via `config/filesystems.php` — leave the fields blank in the CP.
-4. Create an Asset Volume that uses the `nine-s3` filesystem.
-
-## Optional: Redis cache
-
-To use Nine Key-Value Store (Redis-compatible) for Craft's cache:
-
-```bash
-nctl service create craft-cache --type kvs --project my-project
-nctl app service add craft-backend --service craft-cache --name cache --project my-project
-```
-
-This injects `NINE_KVS_CACHE_*` env vars. The `config/app.php` file detects them and switches Craft's cache component to Redis automatically.
