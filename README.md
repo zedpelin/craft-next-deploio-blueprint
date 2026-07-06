@@ -151,8 +151,8 @@ With the env vars set, the `config/filesystems.php` in this blueprint configures
 
 1. Log in to the Craft control panel at `https://craft-backend.{HASH}.deploio.app/admin`.
 2. Go to **Settings → Filesystems → New filesystem**.
-3. Set the handle to `nine-s3` and the type to **Amazon S3**. Leave all credential fields blank — they are read from environment variables.
-4. Create an **Asset Volume** that uses the `nine-s3` filesystem.
+3. Set the handle to `nine_s3` and the type to **Amazon S3**. Leave all credential fields blank — they are read from environment variables.
+4. Create an **Asset Volume** that uses the `nine_s3` filesystem.
 
 ---
 
