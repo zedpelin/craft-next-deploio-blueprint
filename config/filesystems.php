@@ -25,14 +25,12 @@ if (!App::env('BUCKET_ENDPOINT')) {
 
 return [
     'nine_s3' => [
-        'type'        => Fs::class,
-        'keyId'       => App::env('BUCKET_KEY'),
-        'secret'      => App::env('BUCKET_SECRET'),
-        'region'      => App::env('BUCKET_REGION') ?: 'nine-cz42',
-        'bucket'      => App::env('BUCKET_NAME'),
-        'endpoint'    => App::env('BUCKET_ENDPOINT'),
-        'subfolder'   => 'uploads',
-        'addCorsHdrs' => true,
-        'makePublic'  => true,
+        'type'              => Fs::class,
+        'keyId'             => App::env('BUCKET_KEY'),
+        'secret'            => App::env('BUCKET_SECRET'),
+        'region'            => App::env('BUCKET_REGION') ?: 'us-east-1',
+        'bucket'            => App::env('BUCKET_NAME'),
+        'subfolder'         => 'uploads',
+        'makeUploadsPublic' => true,
     ],
 ];
