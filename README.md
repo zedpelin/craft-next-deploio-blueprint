@@ -50,11 +50,11 @@ nctl update app craft-backend \
   --sensitive-env="CRAFT_SECURITY_KEY=$(openssl rand -base64 32)" \
   --env="CRAFT_ENVIRONMENT=production" \
   --env="CRAFT_DEV_MODE=false" \
-  --env="CRAFT_ALLOW_ADMIN_CHANGES=false" \
+  --env="CRAFT_ALLOW_ADMIN_CHANGES=true" \
   --env="CRAFT_STORAGE_PATH=/tmp/craft-storage"
 ```
 
-`CRAFT_SECURITY_KEY` is required — Craft refuses to start without it. `CRAFT_STORAGE_PATH` redirects Craft's runtime writes (logs, caches) to a writable path on Deploio.
+`CRAFT_SECURITY_KEY` is required — Craft refuses to start without it. `CRAFT_STORAGE_PATH` redirects Craft's runtime writes (logs, caches) to a writable path on Deploio. `CRAFT_ALLOW_ADMIN_CHANGES=true` is required for the content migrations to apply project config on first deploy; you can set it to `false` once the site is set up.
 
 ### 3. Provision and connect the database
 
@@ -78,7 +78,7 @@ Wait until a build with `STATUS=Succeeded` appears for `craft-backend`.
 
 ### 5. Install Craft (create admin account)
 
-On first startup the Procfile runs `php craft migrate/all`, which creates the database schema, sets up the News section, and generates a GraphQL bearer token. Once the build has succeeded and the app is running:
+On first startup the Procfile runs `php craft up`, which applies pending migrations and project config (including the News section and GraphQL bearer token). On a fresh database `craft up` exits non-zero and the app returns errors until you create the admin account. Once the build has succeeded:
 
 ```bash
 nctl exec app craft-backend -- php craft install/craft
@@ -175,11 +175,14 @@ nctl create app craft-frontend \
   --git-sub-path=frontend \
   --buildpack-stack=heroku \
   --port=3000 \
+  --build-env="CRAFT_HOST=craft-backend.{HASH}.deploio.app" \
   --env="CRAFT_GQL_URL=https://craft-backend.{HASH}.deploio.app/actions/graphql/api" \
   --sensitive-env="CRAFT_GQL_TOKEN={YOUR_BEARER_TOKEN}"
 ```
 
 Replace `{HASH}` with your project hash and `{YOUR_BEARER_TOKEN}` with the token from Part 1.
+
+`CRAFT_HOST` is a **build-time** env var (passed with `--build-env`, not `--env`) — Next.js reads it at build time to configure `remotePatterns` for image optimisation.
 
 > **Note the GraphQL endpoint path.** CraftCMS 5 exposes the GraphQL API at `/actions/graphql/api`, not `/api`.
 
