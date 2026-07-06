@@ -164,7 +164,7 @@ With the env vars set, the `config/filesystems.php` in this blueprint configures
 nctl get app craft-backend
 ```
 
-Note the full hostname from the `HOSTS` column, e.g. `craft-backend.baa74b2.deploio.app`.
+Note the full hostname from the `HOSTS` column, e.g. `craft-backend.a1b2c3d.deploio.app`.
 
 ### 2. Create the frontend app
 
