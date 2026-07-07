@@ -36,5 +36,11 @@ return [
         'bucket'            => App::env('BUCKET_NAME'),
         'subfolder'         => 'uploads',
         'makeUploadsPublic' => true,
+        // Set the base URL to endpoint/bucket only — Craft appends the subfolder
+        // via addSubfolderToRootUrl. If the URL in project config (set via the CP)
+        // already includes the subfolder, Craft would produce a double-subfolder URL
+        // like /uploads/uploads/. Driving the URL from env vars here prevents that.
+        'url'                    => rtrim(App::env('BUCKET_ENDPOINT') ?: '', '/') . '/' . App::env('BUCKET_NAME'),
+        'addSubfolderToRootUrl'  => true,
     ],
 ];
