@@ -26,8 +26,12 @@ if (!App::env('BUCKET_ENDPOINT')) {
 return [
     'nine_s3' => [
         'type'              => Fs::class,
-        'keyId'             => App::env('BUCKET_KEY'),
-        'secret'            => App::env('BUCKET_SECRET'),
+        // Leave keyId and secret empty so the plugin skips the AWS STS exchange
+        // and the SDK credential chain picks up AWS_ACCESS_KEY_ID /
+        // AWS_SECRET_ACCESS_KEY env vars directly. Nine Object Storage credentials
+        // are not AWS IAM credentials and are rejected by STS.
+        'keyId'             => '',
+        'secret'            => '',
         'region'            => App::env('BUCKET_REGION') ?: 'us-east-1',
         'bucket'            => App::env('BUCKET_NAME'),
         'subfolder'         => 'uploads',
