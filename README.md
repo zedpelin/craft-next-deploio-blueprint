@@ -9,9 +9,9 @@ The backend exposes a GraphQL API; the frontend fetches content at request time 
 ```
 .                        # Craft CMS backend (PHP)
 ├── config/
-│   ├── app.php          # Yii app config (Redis cache component)
+│   ├── app.php          # Yii app config: Redis cache, GD timeout fix, S3 SSE fix
 │   ├── db.php           # Database config (reads Deploio service-connection vars)
-│   └── filesystems.php  # S3-compatible asset storage (reads BUCKET_* vars)
+│   └── filesystems.php  # S3-compatible asset storage (reads BUCKET_* / AWS_* vars)
 ├── migrations/          # Content migrations (News section, GQL schema, bearer token)
 ├── web/index.php        # Craft web entry point
 ├── Procfile             # Deploio: run migrations then start Apache
@@ -139,13 +139,16 @@ SECRET_KEY=$(nctl get bucketuser craft-assets-user --print-secret-key)
 # Inject them into the app
 nctl update app craft-backend \
   --env="BUCKET_ENDPOINT=https://cz42.objects.nineapis.ch" \
+  --env="AWS_ENDPOINT_URL_S3=https://cz42.objects.nineapis.ch" \
   --env="BUCKET_NAME=craft-assets" \
   --env="BUCKET_REGION=us-east-1" \
-  --sensitive-env="BUCKET_KEY=${ACCESS_KEY}" \
-  --sensitive-env="BUCKET_SECRET=${SECRET_KEY}"
+  --sensitive-env="AWS_ACCESS_KEY_ID=${ACCESS_KEY}" \
+  --sensitive-env="AWS_SECRET_ACCESS_KEY=${SECRET_KEY}"
 ```
 
 > Adjust the endpoint to match your chosen location: `cz42` → `https://cz42.objects.nineapis.ch`, `es34` → `https://es34.objects.nineapis.ch`.
+
+`BUCKET_ENDPOINT` is used as a runtime guard by `config/filesystems.php`. `AWS_ENDPOINT_URL_S3` is the endpoint the AWS SDK uses for requests — Nine Object Storage credentials are not AWS IAM credentials and are rejected by AWS STS, so credentials are passed as standard AWS SDK env vars (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) rather than through Craft's own credential fields.
 
 With the env vars set, the `config/filesystems.php` in this blueprint configures an S3-compatible filesystem automatically. The last step is to wire it up inside Craft:
 
