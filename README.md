@@ -129,8 +129,8 @@ nctl create bucket craft-assets --location=nine-cz42 --wait
 # Create a bucket user to hold write credentials
 nctl create bucketuser craft-assets-user --location=nine-cz42 --wait
 
-# Grant the user write access to the bucket
-nctl update bucket craft-assets --permissions="writer=craft-assets-user"
+# Grant the user write access and make objects publicly readable
+nctl update bucket craft-assets --permissions="writer=craft-assets-user" --public-read
 
 # Retrieve the credentials
 ACCESS_KEY=$(nctl get bucketuser craft-assets-user --print-access-key)
@@ -154,7 +154,7 @@ With the env vars set, the `config/filesystems.php` in this blueprint configures
 
 1. Log in to the Craft control panel at `https://craft-backend.{HASH}.deploio.app/admin`.
 2. Go to **Settings → Filesystems → New filesystem**.
-3. Set the handle to `nine_s3` and the type to **Amazon S3**. Leave all credential fields blank — they are read from environment variables.
+3. Set the handle to `nine_s3` and the type to **Amazon S3**. Leave all credential fields blank — they are read from environment variables. Set the **Base URL** to `https://cz42.objects.nineapis.ch/craft-assets` (endpoint + bucket name, no subfolder suffix). Keep **Add subfolder to root URL** checked. Set **Subfolder** to `uploads`.
 4. Create an **Asset Volume** that uses the `nine_s3` filesystem.
 
 ---
